@@ -1,0 +1,124 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ----------------------------------------------------
+// 1. ENUMS
+// ----------------------------------------------------
+
+enum Role {
+  ADMIN
+  PARTICIPANT
+}
+
+enum ReservationStatus {
+  PENDING
+  PAID
+  EXPIRED
+  CANCELLED
+}
+
+// ----------------------------------------------------
+// 2. MODELOS BASE
+// ----------------------------------------------------
+
+model User {
+  id             String               @id @default(uuid())
+  email          String               @unique
+  password       String
+  name           String?
+  role           Role                 @default(PARTICIPANT)
+  
+  // Relaciones
+  createdEvents  Event[]              @relation("CreatorEvents") 
+  participations EventParticipation[] 
+  reservations   SeatReservation[]    
+
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+}
+
+model Event {
+  id               String               @id @default(uuid())
+  title            String
+  description      String
+  date             DateTime
+  location         String
+  seatPriceCents   Int                  @default(0) 
+
+  // Relación con el Creador (Admin)
+  creatorId        String
+  creator          User                 @relation("CreatorEvents", fields: [creatorId], references: [id])
+  
+  participations   EventParticipation[] 
+  seatReservations SeatReservation[]    
+
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  // Índice para buscar eventos por fecha rápidamente
+  @@index([date])
+}
+
+// ----------------------------------------------------
+// 3. MODELOS DE MOVILIDAD Y RESERVA
+// ----------------------------------------------------
+
+model EventParticipation {
+  id             String            @id @default(uuid())
+  eventId        String
+  userId         String
+  
+  // Movilidad (Oferta de Asientos)
+  hasMobility    Boolean
+  offeredSeats   Int?
+  
+  // Relaciones
+  event          Event             @relation(fields: [eventId], references: [id])
+  user           User              @relation(fields: [userId], references: [id])
+  reservations   SeatReservation[] @relation("MobilityReservations")
+  
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  
+  // Un usuario participa una vez por evento + índices de búsqueda
+  @@unique([eventId, userId])
+  @@index([eventId])
+  @@index([userId])
+}
+
+model SeatReservation {
+  id                String              @id @default(uuid())
+  eventId           String
+  userId            String
+  participationId   String?             // Conductor que provee el asiento
+  
+  reservedSeats     Int                 @default(1)
+  pricePerSeatCents Int                 
+  totalPriceCents   Int                 
+  
+  // Seguimiento de Pago
+  status            ReservationStatus   @default(PENDING)
+  expiresAt         DateTime            
+  paymentIntentId   String?             @unique // ID de Stripe/PayPal para auditoría
+  
+  // Relaciones
+  event             Event               @relation(fields: [eventId], references: [id])
+  user              User                @relation(fields: [userId], references: [id])
+  mobilityOffer     EventParticipation? @relation("MobilityReservations", fields: [participationId], references: [id])
+  
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  // Índices para que el sistema de limpieza de reservas expiradas sea veloz
+  @@index([status])
+  @@index([expiresAt])
+  @@index([eventId])
+}
